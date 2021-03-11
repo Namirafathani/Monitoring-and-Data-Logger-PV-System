@@ -20,23 +20,23 @@
 #include <SPI.h>
 #include <PubSubClient.h>
 #include <WiFi101.h>
+#include <ArduinoJson.h>
 
 // Update these with values suitable for your network.
 
 /************************* WiFi Access Point *********************************/
 
-const char* ssid = "DTEO-VOKASI";
-const char* password = "TEO123456";
+const char* ssid = "GL 73";
+const char* password = "gbglor73";
 
 /**************************** MQTT Broker ************************************/
 
-const char* mqtt_server = "10.170.81.240"; // example: "192.168.0.8"
-//const char* mqtt_username = "local mosquitto";
-//const char* mqtt_password = "yourmqttpass";
+const char* mqtt_server = "192.168.100.206"; // example: "192.168.0.8"
+
 const char* mqtt_topic_watt = "mkr-energy-01/watt";
 const char* mqtt_topic_kwh = "mkr-energy-01/kwh";
 const char* mqtt_topic_pulse = "mkr-energy-01/pulse";
-const char* mkr1000 = "10.170.81.234";
+const char* mkr1000 = "192.168.100.208";
 
 #define DIGITAL_INPUT_SENSOR 6 // The digital input you attached S0+ D6 in Wemos D1 mini
 #define PULSE_FACTOR 2000       // Nummber of pulses per kWh of your meeter
@@ -50,6 +50,7 @@ volatile unsigned long watt = 0;
 unsigned long oldWatt = 0;
 double oldKwh;
 unsigned long lastSend;
+double kwh;
 
 WiFiClient mkrClient;
 PubSubClient client(mkrClient);
@@ -98,12 +99,39 @@ void reconnect() {
     // Attempt to connect
     if (client.connect("mkr1000Client")) {
       Serial.println("connected");
+      const size_t Restart = JSON_OBJECT_SIZE(2);
+      DynamicJsonBuffer jsonBuffer(Restart);
+      JsonObject& root = jsonBuffer.createObject();
+
+      root["id_energymeter"] = "New_System";
+      root["flagstart"] = 1;
+
+      char buffermessage[300];
+      root.printTo(buffermessage, sizeof(buffermessage));
+
+      Serial.println("Sending message to MQTT topic...");
+      Serial.println(buffermessage);
+
+      client.publish("EM/startcontroller", buffermessage);
+
+      if(client.publish("EM/startcontroller", buffermessage) == true){
+        Serial.println("Success sending message");
+        Serial.println("---------------------------------------------");
+        Serial.println("");
+      }
+      else{
+        Serial.println("ERROR");
+        Serial.println("---------------------------------------------");
+        Serial.println("");
+      }
+    
+      
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
-      delay(5000);
+      delay(2000);
     }
   }
 }
@@ -138,24 +166,61 @@ void loop()
             // could hapen when long wraps or false interrupt triggered
             if (watt<((unsigned long)MAX_WATT)) {
                 // convert to a string with 2 digits before the comma and 2 digits for precision
-             //   dtostrf(watt, 4, 1, wattString);
+             //   dtostrf(watt, 4, 1, wattString);                  
                 client.publish(mqtt_topic_watt,wattString);  // Publish watt to MQTT topic
             }
-            Serial.print("Watt:");
-            Serial.println(watt);
+            //Serial.print("Watt:");
+            //Serial.println(watt);
            // Serial.println(wattString);
             oldWatt = watt;
            // dtostrf(pulseCount, 4, 1, pulseCountString); // To Do: convert int to str, but not like this
-            client.publish(mqtt_topic_pulse,pulseCountString);  // Publish pulses to MQTT topic
+            //client.publish(mqtt_topic_pulse,pulseCountString);  // Publish pulses to MQTT topic
             double kwh = ((double)pulseCount/((double)PULSE_FACTOR));
             // convert to a string with 2 digits before the comma and 2 digits for precision
 //            dtostrf(kwh, 2, 2, kwhString);
-            client.publish(mqtt_topic_kwh,kwhString);  // Publish kwh to MQTT topic
+            //client.publish(mqtt_topic_kwh,kwhString);  // Publish kwh to MQTT topic
             oldKwh = kwh;
             lastSend = now;  // once every thing is published we update the send time
+            publishData();
         }
     }
 
+}
+
+void publishData(){
+  Serial.print("Publish data");
+  Serial.println("watt, pulseCount and kwh");
+  Serial.print(watt);
+  Serial.print(", ");
+  Serial.print(pulseCount);
+  Serial.print(", ");
+  Serial.println(kwh);
+
+  const size_t BUFFER_SIZE = JSON_OBJECT_SIZE(7);
+
+  DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
+    JsonObject& JSONencoder = jsonBuffer.createObject();
+
+    /* Encode object in jsonBuffer */
+    JSONencoder["id_EM"] = "EM01";
+    JSONencoder["watt_reading"] = watt;
+    JSONencoder["PulseCount_reading"] = pulseCount;
+    JSONencoder["kwh_reading"] = kwh;
+    JSONencoder["flagdata"] = 1;
+
+    char JSONmessageBuffer[500];
+    JSONencoder.printTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+
+    Serial.println("Sending message to MQTT topic");
+    Serial.println(JSONmessageBuffer);
+
+    client.publish("EM/datacollector", JSONmessageBuffer);
+
+    if(client.publish("EM/datacollector", JSONmessageBuffer)==true){
+      Serial.println("SUCCESS PUBLISH PAYLOAD");
+    } else {
+      Serial.println("ERROR PUBLISH PAYLOAD");
+    }
 }
 
 void onPulse()
